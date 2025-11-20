@@ -1,86 +1,70 @@
-using System;
-using System.Collections;
 using UnityEngine;
 
-public class ErosionCoroutine : MonoBehaviour
+public class Erosion : MonoBehaviour
 {
-    [Header("Targets")]
+    [Header("References")]
     public MeshGenerator meshGenerator;
-    public float[,] heightMap;
+    public MapGenerator mapGenerator;
 
-    [Header("Run")]
-    public int droplets = 20000;
-    public int seed = 12345;
-    public float delaySeconds = 0.01f;
-    public int meshUpdateInterval = 20;
-    public int bakeIterations = 1;        // how many times to run droplet loop in BakeErosionOnce
+    [HideInInspector] public float[,] heightMap;  
+    [Tooltip("How many droplets per bake")]
+    public int numIterations = 50000;
 
-    [Header("Hydraulic Params")]
-    public int maxLifetime = 30;
-    public float inertia = 0.05f;
-    public float sedimentCapacityFactor = 4f;
-    public float minSedimentCapacity = 0.01f;
-    public float depositSpeed = 0.3f;
-    public float erodeSpeed = 0.3f;
-    public float evaporateSpeed = 0.01f;
-    public float gravity = 4f;
-    public float initialWater = 1f;
-    public float initialSpeed = 1f;
-    public int brushRadius = 3;
+    [Header("Erosion Settings")]
+    public int seed;
+    [Range(2, 8)] public int erosionRadius = 3;
+    [Range(0, 1)] public float inertia = .05f;
+    public float sedimentCapacityFactor = 4;
+    public float minSedimentCapacity = .01f;
+    [Range(0, 1)] public float erodeSpeed = .3f;
+    [Range(0, 1)] public float depositSpeed = .3f;
+    [Range(0, 1)] public float evaporateSpeed = .01f;
+    public float gravity = 4;
+    public int maxDropletLifetime = 30;
+    public float initialWaterVolume = 1;
+    public float initialSpeed = 1;
 
-    [Header("Spike / Smoothing Controls")]
-    public float maxStepAmount = 0.02f;   // max height change per cell *per droplet step*
-    public float minHeightFloor = 0f;
-    public int slopeRelaxIterations = 0;
-    public float talus = 0.015f;
+    int[][] erosionBrushIndices;
+    float[][] erosionBrushWeights;
+    System.Random prng;
 
-    // NEW: hard slope clamp – after this runs, spikes cannot exist
-    public float hardMaxNeighbourDiff = 0.02f; // max allowed diff vs neighbour avg
-    public int hardClampIterations = 4;        // more iterations = smoother / safer
+    int currentSeed;
+    int currentErosionRadius;
+    int currentMapSize;
 
-    int mapW = -1, mapH = -1;
-    int[][] brushIndices;
-    float[][] brushWeights;
-
-    Coroutine running;
-
-    public void StartErosion()
+    public void ErosionBake()
     {
-        if (running != null) StopCoroutine(running);
-        if (heightMap == null && meshGenerator != null) heightMap = meshGenerator.heightMap;
         if (heightMap == null)
         {
-            Debug.LogWarning("ErosionCoroutine: heightMap is null.");
+            if (meshGenerator != null && meshGenerator.heightMap != null)
+                heightMap = meshGenerator.heightMap;
+            else if (mapGenerator != null && mapGenerator.currentHeightMap != null)
+                heightMap = mapGenerator.currentHeightMap;
+        }
+
+        if (heightMap == null)
+        {
+            Debug.LogWarning("Erosion: heightMap is null, cannot bake.");
             return;
         }
-        EnsureBrush(heightMap);
-        running = StartCoroutine(Run());
-    }
 
-    public void StopErosion()
-    {
-        if (running != null) StopCoroutine(running);
-        running = null;
-    }
-
-    IEnumerator Run()
-    {
-        var rng = new System.Random(seed);
-        for (int i = 0; i < droplets; i++)
+        int mapSize = heightMap.GetLength(0);
+        if (mapSize != heightMap.GetLength(1))
         {
-            ApplyDroplet(heightMap, rng);
-
-            if (meshGenerator != null && (i % meshUpdateInterval == 0))
-            {
-                meshGenerator.heightMap = heightMap;
-                meshGenerator.CreateShape();
-            }
-
-            if (delaySeconds > 0f) yield return new WaitForSeconds(delaySeconds);
-            else yield return null;
+            Debug.LogWarning("Erosion: heightMap must be square.");
+            return;
         }
 
-        FinalizeMap(heightMap);
+        float[] map1D = new float[mapSize * mapSize];
+        for (int y = 0; y < mapSize; y++)
+            for (int x = 0; x < mapSize; x++)
+                map1D[y * mapSize + x] = heightMap[x, y];
+
+        Erode(map1D, mapSize, numIterations, true);
+
+        for (int y = 0; y < mapSize; y++)
+            for (int x = 0; x < mapSize; x++)
+                heightMap[x, y] = map1D[y * mapSize + x];
 
         if (meshGenerator != null)
         {
@@ -88,446 +72,192 @@ public class ErosionCoroutine : MonoBehaviour
             meshGenerator.CreateShape();
         }
 
-        running = null;
-    }
-
-    public void TestDigCenterPit()
-    {
-        if (heightMap == null && meshGenerator != null)
-            heightMap = meshGenerator.heightMap;
-
-        if (heightMap == null)
+        // Regenerate textures
+        if (mapGenerator != null)
         {
-            Debug.LogWarning("TestDigCenterPit: heightMap is null.");
-            return;
+            mapGenerator.RegenerateTexturesFromHeightMap(heightMap);
         }
 
-        int sx = heightMap.GetLength(0);
-        int sy = heightMap.GetLength(1);
-        int cx = sx / 2;
-        int cy = sy / 2;
-        int radius = 5;
+        Debug.Log("Erosion: bake complete.");
+    }
 
-        for (int x = cx - radius; x <= cx + radius; x++)
+    void Initialize(int mapSize, bool resetSeed)
+    {
+        if (resetSeed || prng == null || currentSeed != seed)
         {
-            for (int y = cy - radius; y <= cy + radius; y++)
+            prng = new System.Random(seed);
+            currentSeed = seed;
+        }
+
+        if (erosionBrushIndices == null || currentErosionRadius != erosionRadius || currentMapSize != mapSize)
+        {
+            InitializeBrushIndices(mapSize, erosionRadius);
+            currentErosionRadius = erosionRadius;
+            currentMapSize = mapSize;
+        }
+    }
+
+    public void Erode(float[] map, int mapSize, int numIterations = 1, bool resetSeed = false)
+    {
+        Initialize(mapSize, resetSeed);
+
+        for (int iteration = 0; iteration < numIterations; iteration++)
+        {
+            float posX = prng.Next(0, mapSize - 1);
+            float posY = prng.Next(0, mapSize - 1);
+            float dirX = 0;
+            float dirY = 0;
+            float speed = initialSpeed;
+            float water = initialWaterVolume;
+            float sediment = 0;
+
+            for (int lifetime = 0; lifetime < maxDropletLifetime; lifetime++)
             {
-                if (x >= 0 && x < sx && y >= 0 && y < sy)
+                int nodeX = (int)posX;
+                int nodeY = (int)posY;
+                int dropletIndex = nodeY * mapSize + nodeX;
+                float cellOffsetX = posX - nodeX;
+                float cellOffsetY = posY - nodeY;
+
+                HeightAndGradient heightAndGradient = CalculateHeightAndGradient(map, mapSize, posX, posY);
+
+                dirX = (dirX * inertia - heightAndGradient.gradientX * (1 - inertia));
+                dirY = (dirY * inertia - heightAndGradient.gradientY * (1 - inertia));
+                float len = Mathf.Sqrt(dirX * dirX + dirY * dirY);
+                if (len != 0)
                 {
-                    heightMap[x, y] = 0f;
+                    dirX /= len;
+                    dirY /= len;
                 }
-            }
-        }
+                posX += dirX;
+                posY += dirY;
 
-        if (meshGenerator != null)
-        {
-            meshGenerator.heightMap = heightMap;
-            meshGenerator.CreateShape();
-        }
-
-        Debug.Log("TestDigCenterPit: crater applied and mesh updated.");
-    }
-
-    public void BakeErosionOnce()
-    {
-        if (heightMap == null && meshGenerator != null)
-            heightMap = meshGenerator.heightMap;
-
-        if (heightMap == null)
-        {
-            Debug.LogWarning("BakeErosionOnce: heightMap is null.");
-            return;
-        }
-
-        EnsureBrush(heightMap);
-
-        var rng = new System.Random(seed);
-
-        for (int iter = 0; iter < bakeIterations; iter++)
-        {
-            for (int i = 0; i < droplets; i++)
-            {
-                ApplyDroplet(heightMap, rng);
-            }
-        }
-
-        FinalizeMap(heightMap);
-
-        if (meshGenerator != null)
-        {
-            meshGenerator.heightMap = heightMap;
-            meshGenerator.CreateShape();
-        }
-
-        Debug.Log($"BakeErosionOnce: erosion baked with {bakeIterations} iterations and mesh updated.");
-    }
-
-    void EnsureBrush(float[,] map)
-    {
-        int w = map.GetLength(0), h = map.GetLength(1);
-        if (w <= 1 || h <= 1) return;
-        if (w != mapW || h != mapH || brushIndices == null) BuildBrush(w, h);
-    }
-
-    void ApplyDroplet(float[,] map, System.Random rng)
-    {
-        int sizeX = map.GetLength(0);
-        int sizeY = map.GetLength(1);
-        if (sizeX <= 1 || sizeY <= 1) return;
-
-        float posX = (float)rng.NextDouble() * (sizeX - 1);
-        float posY = (float)rng.NextDouble() * (sizeY - 1);
-        float dirX = 0f, dirY = 0f;
-        float speed = initialSpeed;
-        float water = initialWater;
-        float sediment = 0f;
-
-        for (int life = 0; life < maxLifetime; life++)
-        {
-            int cx = (int)posX;
-            int cy = (int)posY;
-            float cellX = posX - cx;
-            float cellY = posY - cy;
-
-            float h00 = map[cx, cy];
-            float h10 = map[Math.Min(cx + 1, sizeX - 1), cy];
-            float h01 = map[cx, Math.Min(cy + 1, sizeY - 1)];
-            float h11 = map[Math.Min(cx + 1, sizeX - 1), Math.Min(cy + 1, sizeY - 1)];
-            float height = Bilinear(h00, h10, h01, h11, cellX, cellY);
-
-            float gradX = ((h10 - h00) * (1f - cellY)) + ((h11 - h01) * cellY);
-            float gradY = ((h01 - h00) * (1f - cellX)) + ((h11 - h10) * cellX);
-
-            dirX = dirX * inertia - gradX * (1f - inertia);
-            dirY = dirY * inertia - gradY * (1f - inertia);
-
-            float len = Sqrt(dirX * dirX + dirY * dirY);
-            if (len != 0f) { dirX /= len; dirY /= len; }
-
-            posX += dirX;
-            posY += dirY;
-
-            if (posX < 0f || posX >= sizeX - 1 || posY < 0f || posY >= sizeY - 1) break;
-
-            int nx = (int)posX;
-            int ny = (int)posY;
-            float ncellX = posX - nx;
-            float ncellY = posY - ny;
-
-            float nh00 = map[nx, ny];
-            float nh10 = map[Math.Min(nx + 1, sizeX - 1), ny];
-            float nh01 = map[nx, Math.Min(ny + 1, sizeY - 1)];
-            float nh11 = map[Math.Min(nx + 1, sizeX - 1), Math.Min(ny + 1, sizeY - 1)];
-            float newHeight = Bilinear(nh00, nh10, nh01, nh11, ncellX, ncellY);
-
-            float deltaH = newHeight - height;
-            float capacity = Max(-deltaH * speed * water * sedimentCapacityFactor, minSedimentCapacity);
-
-            if (sediment > capacity || deltaH > 0f)
-            {
-                float toDeposit = (deltaH > 0f)
-                    ? Min(deltaH, sediment)
-                    : (sediment - capacity) * depositSpeed;
-
-                if (toDeposit > 0f)
+                if ((dirX == 0 && dirY == 0) || posX < 0 || posX >= mapSize - 1 || posY < 0 || posY >= mapSize - 1)
                 {
-                    // limit total deposit this step (spread across 4 cells)
-                    float maxDeposit = maxStepAmount * 4f;
-                    if (toDeposit > maxDeposit) toDeposit = maxDeposit;
-
-                    Deposit(map, nx, ny, ncellX, ncellY, toDeposit);
-                    sediment -= toDeposit;
-                }
-            }
-            else
-            {
-                float toErode = Min((capacity - sediment) * erodeSpeed, -deltaH);
-                if (toErode > 0f)
-                    sediment += ErodeAt(map, nx, ny, toErode);
-            }
-
-            speed = Sqrt(Max(0f, speed * speed + deltaH * gravity));
-            water *= (1f - evaporateSpeed);
-            if (water <= 0.001f) break;
-
-            height = newHeight;
-        }
-    }
-
-    void FinalizeMap(float[,] map)
-    {
-        // Optional thermal smoothing
-        if (slopeRelaxIterations > 0)
-            ThermalRelax(map, slopeRelaxIterations, talus);
-
-        // Light despike (handles small single-cell pops)
-        Despike(map, spikeThreshold: 0.02f, iterations: 1);
-
-        // HARD clamp: after this, no cell can differ from its neighbours' avg
-        // by more than hardMaxNeighbourDiff
-        if (hardClampIterations > 0 && hardMaxNeighbourDiff > 0f)
-            HardClampSlopes(map, hardMaxNeighbourDiff, hardClampIterations);
-
-        int sizeX = map.GetLength(0), sizeY = map.GetLength(1);
-        for (int x = 0; x < sizeX; x++)
-        {
-            for (int y = 0; y < sizeY; y++)
-            {
-                float h = map[x, y];
-
-                if (h < minHeightFloor) h = minHeightFloor;
-
-                map[x, y] = Clamp01(h);
-            }
-        }
-    }
-
-    void BuildBrush(int sizeX, int sizeY)
-    {
-        mapW = sizeX; mapH = sizeY;
-        int radius = Math.Max(1, brushRadius);
-        int diameter = radius * 2 + 1;
-
-        brushIndices = new int[sizeX * sizeY][];
-        brushWeights = new float[sizeX * sizeY][];
-
-        (int ox, int oy, float w)[] templ = new (int, int, float)[diameter * diameter];
-        int tCount = 0; float tSum = 0f;
-
-        for (int oy = -radius; oy <= radius; oy++)
-            for (int ox = -radius; ox <= radius; ox++)
-            {
-                float dist = Sqrt(ox * ox + oy * oy);
-                if (dist <= radius + 1e-4f)
-                {
-                    float w = 1f - (dist / (radius + 1e-4f));
-                    templ[tCount++] = (ox, oy, w);
-                    tSum += w;
-                }
-            }
-        for (int i = 0; i < tCount; i++) templ[i].w /= tSum;
-
-        for (int y = 0; y < sizeY; y++)
-            for (int x = 0; x < sizeX; x++)
-            {
-                int idx = y * sizeX + x;
-                int valid = 0;
-                for (int i = 0; i < tCount; i++)
-                {
-                    int px = x + templ[i].ox, py = y + templ[i].oy;
-                    if (px >= 0 && px < sizeX && py >= 0 && py < sizeY) valid++;
+                    break;
                 }
 
-                var indices = new int[valid];
-                var weights = new float[valid];
-                float sum = 0f; int wri = 0;
+                float newHeight = CalculateHeightAndGradient(map, mapSize, posX, posY).height;
+                float deltaHeight = newHeight - heightAndGradient.height;
 
-                for (int i = 0; i < tCount; i++)
+                float sedimentCapacity = Mathf.Max(-deltaHeight * speed * water * sedimentCapacityFactor, minSedimentCapacity);
+
+                if (sediment > sedimentCapacity || deltaHeight > 0)
                 {
-                    int px = x + templ[i].ox, py = y + templ[i].oy;
-                    if (px < 0 || px >= sizeX || py < 0 || py >= sizeY) continue;
-                    indices[wri] = py * sizeX + px;
-                    float w = templ[i].w;
-                    weights[wri] = w;
-                    sum += w;
-                    wri++;
+                    float amountToDeposit = (deltaHeight > 0) ?
+                        Mathf.Min(deltaHeight, sediment) :
+                        (sediment - sedimentCapacity) * depositSpeed;
+                    sediment -= amountToDeposit;
+
+                    map[dropletIndex] += amountToDeposit * (1 - cellOffsetX) * (1 - cellOffsetY);
+                    map[dropletIndex + 1] += amountToDeposit * cellOffsetX * (1 - cellOffsetY);
+                    map[dropletIndex + mapSize] += amountToDeposit * (1 - cellOffsetX) * cellOffsetY;
+                    map[dropletIndex + mapSize + 1] += amountToDeposit * cellOffsetX * cellOffsetY;
                 }
-                for (int i = 0; i < weights.Length; i++) weights[i] /= sum;
-                brushIndices[idx] = indices;
-                brushWeights[idx] = weights;
-            }
-    }
-
-    float ErodeAt(float[,] map, int x, int y, float amount)
-    {
-        int sizeX = map.GetLength(0);
-        int brushIndex = y * sizeX + x;
-
-        var indices = brushIndices[brushIndex];
-        var weights = brushWeights[brushIndex];
-
-        float removed = 0f;
-        float maxPerCell = maxStepAmount;
-
-        for (int i = 0; i < indices.Length; i++)
-        {
-            int flat = indices[i];
-            int px = flat % sizeX;
-            int py = flat / sizeX;
-
-            float h = map[px, py];
-            float weightedAmount = amount * weights[i];
-
-            float delta = weightedAmount;
-            if (delta > maxPerCell) delta = maxPerCell;
-            if (delta > h) delta = h;
-            if (delta <= 0f) continue;
-
-            map[px, py] = h - delta;
-            removed += delta;
-        }
-
-        return removed;
-    }
-
-    void Deposit(float[,] map, int x, int y, float fx, float fy, float amount)
-    {
-        int sizeX = map.GetLength(0);
-        int sizeY = map.GetLength(1);
-
-        float posX = x + fx;
-        float posY = y + fy;
-
-        int cx = (int)posX;
-        int cy = (int)posY;
-
-        if (cx < 0 || cx >= sizeX - 1 || cy < 0 || cy >= sizeY - 1)
-            return;
-
-        float cellX = posX - cx;
-        float cellY = posY - cy;
-
-        float w00 = (1f - cellX) * (1f - cellY);
-        float w10 = cellX * (1f - cellY);
-        float w01 = (1f - cellX) * cellY;
-        float w11 = cellX * cellY;
-
-        float maxPerCell = maxStepAmount;
-
-        void AddClamped(int px, int py, float w)
-        {
-            float d = amount * w;
-            if (d > maxPerCell) d = maxPerCell;
-            if (d < -maxPerCell) d = -maxPerCell;
-            map[px, py] += d;
-        }
-
-        AddClamped(cx, cy, w00);
-        AddClamped(cx + 1, cy, w10);
-        AddClamped(cx, cy + 1, w01);
-        AddClamped(cx + 1, cy + 1, w11);
-    }
-
-    void ThermalRelax(float[,] map, int iterations, float talusVal)
-    {
-        int w = map.GetLength(0), h = map.GetLength(1);
-        for (int it = 0; it < iterations; it++)
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
+                else
                 {
-                    if (x + 1 < w) RelaxPair(map, x, y, x + 1, y, talusVal);
-                    if (y + 1 < h) RelaxPair(map, x, y, x, y + 1, talusVal);
-                }
-    }
+                    float amountToErode = Mathf.Min((sedimentCapacity - sediment) * erodeSpeed, -deltaHeight);
 
-    void RelaxPair(float[,] m, int x0, int y0, int x1, int y1, float talusVal)
-    {
-        float h0 = m[x0, y0];
-        float h1 = m[x1, y1];
-        float diff = h0 - h1;
-        if (diff > talusVal)
-        {
-            float move = 0.25f * (diff - talusVal);
-            move = Min(move, maxStepAmount * 0.25f);
-            m[x0, y0] = h0 - move;
-            m[x1, y1] = h1 + move;
-        }
-        else if (-diff > talusVal)
-        {
-            float move = 0.25f * (-diff - talusVal);
-            move = Min(move, maxStepAmount * 0.25f);
-            m[x0, y0] = h0 + move;
-            m[x1, y1] = h1 - move;
-        }
-    }
-
-    void Despike(float[,] map, float spikeThreshold, int iterations)
-    {
-        int w = map.GetLength(0);
-        int h = map.GetLength(1);
-
-        for (int it = 0; it < iterations; it++)
-        {
-            for (int y = 1; y < h - 1; y++)
-            {
-                for (int x = 1; x < w - 1; x++)
-                {
-                    float hC = map[x, y];
-
-                    float hL = map[x - 1, y];
-                    float hR = map[x + 1, y];
-                    float hD = map[x, y - 1];
-                    float hU = map[x, y + 1];
-
-                    float avg = (hL + hR + hD + hU) * 0.25f;
-                    float diff = hC - avg;
-
-                    if (diff > spikeThreshold)
+                    for (int brushPointIndex = 0; brushPointIndex < erosionBrushIndices[dropletIndex].Length; brushPointIndex++)
                     {
-                        map[x, y] = avg + spikeThreshold;
-                    }
-                    else if (diff < -spikeThreshold)
-                    {
-                        map[x, y] = avg - spikeThreshold;
+                        int nodeIndex = erosionBrushIndices[dropletIndex][brushPointIndex];
+                        float weighedErodeAmount = amountToErode * erosionBrushWeights[dropletIndex][brushPointIndex];
+                        float deltaSediment = (map[nodeIndex] < weighedErodeAmount) ? map[nodeIndex] : weighedErodeAmount;
+                        map[nodeIndex] -= deltaSediment;
+                        sediment += deltaSediment;
                     }
                 }
+
+                speed = Mathf.Sqrt(speed * speed + deltaHeight * gravity);
+                water *= (1 - evaporateSpeed);
             }
         }
     }
 
-    // NEW: hard slope clamp using 8-neighbour average
-    void HardClampSlopes(float[,] map, float maxDiff, int iterations)
+    HeightAndGradient CalculateHeightAndGradient(float[] nodes, int mapSize, float posX, float posY)
     {
-        int w = map.GetLength(0);
-        int h = map.GetLength(1);
+        int coordX = (int)posX;
+        int coordY = (int)posY;
 
-        for (int it = 0; it < iterations; it++)
+        float x = posX - coordX;
+        float y = posY - coordY;
+
+        int nodeIndexNW = coordY * mapSize + coordX;
+        float heightNW = nodes[nodeIndexNW];
+        float heightNE = nodes[nodeIndexNW + 1];
+        float heightSW = nodes[nodeIndexNW + mapSize];
+        float heightSE = nodes[nodeIndexNW + mapSize + 1];
+
+        float gradientX = (heightNE - heightNW) * (1 - y) + (heightSE - heightSW) * y;
+        float gradientY = (heightSW - heightNW) * (1 - x) + (heightSE - heightNE) * x;
+
+        float height = heightNW * (1 - x) * (1 - y) +
+                       heightNE * x * (1 - y) +
+                       heightSW * (1 - x) * y +
+                       heightSE * x * y;
+
+        return new HeightAndGradient() { height = height, gradientX = gradientX, gradientY = gradientY };
+    }
+
+    void InitializeBrushIndices(int mapSize, int radius)
+    {
+        erosionBrushIndices = new int[mapSize * mapSize][];
+        erosionBrushWeights = new float[mapSize * mapSize][];
+
+        int[] xOffsets = new int[radius * radius * 4];
+        int[] yOffsets = new int[radius * radius * 4];
+        float[] weights = new float[radius * radius * 4];
+        float weightSum = 0;
+        int addIndex = 0;
+
+        for (int i = 0; i < erosionBrushIndices.GetLength(0); i++)
         {
-            float[,] src = (float[,])map.Clone();
+            int centreX = i % mapSize;
+            int centreY = i / mapSize;
 
-            for (int y = 1; y < h - 1; y++)
+            weightSum = 0;
+            addIndex = 0;
+            for (int y = -radius; y <= radius; y++)
             {
-                for (int x = 1; x < w - 1; x++)
+                for (int x = -radius; x <= radius; x++)
                 {
-                    float hC = src[x, y];
-
-                    float sum = 0f;
-                    int count = 0;
-
-                    for (int oy = -1; oy <= 1; oy++)
+                    float sqrDst = x * x + y * y;
+                    if (sqrDst < radius * radius)
                     {
-                        for (int ox = -1; ox <= 1; ox++)
+                        int coordX = centreX + x;
+                        int coordY = centreY + y;
+
+                        if (coordX >= 0 && coordX < mapSize && coordY >= 0 && coordY < mapSize)
                         {
-                            if (ox == 0 && oy == 0) continue;
-                            sum += src[x + ox, y + oy];
-                            count++;
+                            float weight = 1 - Mathf.Sqrt(sqrDst) / radius;
+                            weightSum += weight;
+                            weights[addIndex] = weight;
+                            xOffsets[addIndex] = x;
+                            yOffsets[addIndex] = y;
+                            addIndex++;
                         }
                     }
-
-                    float avg = sum / count;
-                    float diff = hC - avg;
-
-                    if (diff > maxDiff)
-                        map[x, y] = avg + maxDiff;
-                    else if (diff < -maxDiff)
-                        map[x, y] = avg - maxDiff;
-                    else
-                        map[x, y] = hC;
                 }
+            }
+
+            int numEntries = addIndex;
+            erosionBrushIndices[i] = new int[numEntries];
+            erosionBrushWeights[i] = new float[numEntries];
+
+            for (int j = 0; j < numEntries; j++)
+            {
+                erosionBrushIndices[i][j] =
+                    (yOffsets[j] + centreY) * mapSize +
+                    xOffsets[j] + centreX;
+                erosionBrushWeights[i][j] = weights[j] / weightSum;
             }
         }
     }
 
-    float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
-    float Lerp(float a, float b, float t) => a + (b - a) * t;
-    float Max(float a, float b) => a > b ? a : b;
-    float Min(float a, float b) => a < b ? a : b;
-    float Sqrt(float v) => (float)Math.Sqrt(v);
-
-    float Bilinear(float h00, float h10, float h01, float h11, float tx, float ty)
+    struct HeightAndGradient
     {
-        float a = Lerp(h00, h10, tx);
-        float b = Lerp(h01, h11, tx);
-        return Lerp(a, b, ty);
+        public float height;
+        public float gradientX;
+        public float gradientY;
     }
 }

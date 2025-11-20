@@ -1,16 +1,16 @@
-using UnityEngine;
+using static UnityEngine.GraphicsBuffer;
 using UnityEditor;
+using UnityEngine;
 
 [CustomEditor(typeof(MapGenerator))]
 public class MapGeneratorEditor : Editor
 {
-    System.Random prng = new System.Random(0);
+    static System.Random prng = new System.Random();
+
     public override void OnInspectorGUI()
     {
-        //Creates editor of mapgenerator
         MapGenerator mapGen = (MapGenerator)target;
 
-        //Tells mapgenerator if it should auto update
         if (DrawDefaultInspector())
         {
             if (mapGen.autoUpdate)
@@ -19,16 +19,16 @@ public class MapGeneratorEditor : Editor
             }
         }
 
-        //Tells mapgenerator to create current map
         if (GUILayout.Button("Generate"))
         {
             mapGen.GenerateMap(100001);
         }
 
-        //Tells mapgenerator to generate random map
         if (GUILayout.Button("Random seed generate"))
         {
-            mapGen.GenerateMap(prng.Next(-100000, 100000));
+            int randomSeed = prng.Next(0, 100000);
+            mapGen.seed = randomSeed;
+            mapGen.GenerateMap(randomSeed);
         }
     }
 }
