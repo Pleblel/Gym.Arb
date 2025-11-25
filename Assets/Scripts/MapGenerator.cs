@@ -3,7 +3,7 @@ using UnityEngine;
 
 public class MapGenerator : MonoBehaviour
 {
-    public enum DrawMode { NoiseMap, TextureMap, FalloffMap };
+    public enum DrawMode { NoiseMap, TextureMap};
     public DrawMode drawMode;
 
     public int size;
@@ -11,7 +11,6 @@ public class MapGenerator : MonoBehaviour
     public float noiseScale;
     public int octaves;
     [Range(0, 1)] public float persistance;
-    [Range(0, 1)] public float falloffPersistance;
     public float lacunarity;
     public int seed;
 
@@ -68,8 +67,6 @@ public class MapGenerator : MonoBehaviour
         int colorMapSize = baseSize * resolution;
         Color[] colorMap = new Color[colorMapSize * colorMapSize];
 
-        float[,] falloffMap = FalloffMapGenerator.GenerateFalloffMap(baseSize);
-
         for (int y = 0; y < colorMapSize; y++)
         {
             for (int x = 0; x < colorMapSize; x++)
@@ -94,7 +91,6 @@ public class MapGenerator : MonoBehaviour
                     Mathf.Lerp(n01, n11, tx),
                     ty);
 
-                heightValue = Mathf.Clamp01(heightValue - (falloffMap[x0, y0] * falloffPersistance));
 
                 Color finalColor = Color.black;
                 for (int i = 0; i < regions.Length; i++)
@@ -133,8 +129,6 @@ public class MapGenerator : MonoBehaviour
                 display.DrawTexture(TextureGenerator.TextureFromHeightMap(sourceMap));
             else if (drawMode == DrawMode.TextureMap)
                 display.DrawTexture(TextureGenerator.TextureFromColorMap(colorMap, colorMapSize, colorMapSize));
-            else if (drawMode == DrawMode.FalloffMap)
-                display.DrawTexture(TextureGenerator.TextureFromHeightMap(falloffMap));
         }
     }
 

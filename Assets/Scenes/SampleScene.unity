@@ -750,7 +750,10 @@ GameObject:
   - component: {fileID: 1588449919}
   - component: {fileID: 1588449918}
   - component: {fileID: 1588449921}
+  - component: {fileID: 1588449922}
   - component: {fileID: 1588449920}
+  - component: {fileID: 1588449924}
+  - component: {fileID: 1588449923}
   m_Layer: 0
   m_Name: MapGenerator
   m_TagString: Untagged
@@ -776,7 +779,6 @@ MonoBehaviour:
   noiseScale: 100
   octaves: 4
   persistance: 0.3
-  falloffPersistance: 0
   lacunarity: 2
   seed: 0
   offset: {x: 0, y: 0}
@@ -856,6 +858,51 @@ MonoBehaviour:
   maxDropletLifetime: 30
   initialWaterVolume: 1
   initialSpeed: 1
+--- !u!114 &1588449922
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1588449917}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b5ddd9ee5cb11c45ab02ef1ca3ccd02, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  meshGenerator: {fileID: 94236377}
+  useMeshSize: 1
+  customSize: {x: 256, y: 256}
+  seed: 12345
+  warpOctaves: 3
+  warpScale: 160
+  warpStrength: 6
+  baseOctaves: 5
+  baseScale: 120
+  heightMultiplier: 25
+--- !u!114 &1588449923
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1588449917}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 01d521a542718414e8be952f037dbf6d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  size: {x: 128, y: 128}
+  worldSize: {x: 100, y: 100}
+  heightMultiplier: 5
+--- !u!33 &1588449924
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1588449917}
+  m_Mesh: {fileID: 0}
 --- !u!1 &1593532699
 GameObject:
   m_ObjectHideFlags: 0
