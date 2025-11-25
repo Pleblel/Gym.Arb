@@ -845,6 +845,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   meshGenerator: {fileID: 94236377}
   mapGenerator: {fileID: 1588449918}
+  domainWarping: {fileID: 1588449922}
   numIterations: 500000
   seed: 0
   erosionRadius: 3
@@ -871,15 +872,17 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   meshGenerator: {fileID: 94236377}
+  mapGenerator: {fileID: 1588449918}
   useMeshSize: 1
   customSize: {x: 256, y: 256}
-  seed: 12345
-  warpOctaves: 3
+  seed: 757064
+  warpOctaves: 4
   warpScale: 160
-  warpStrength: 6
-  baseOctaves: 5
+  warpStrength: 75
+  baseOctaves: 4
   baseScale: 120
-  heightMultiplier: 25
+  heightMultiplier: 20
+  autoUpdate: 1
 --- !u!114 &1588449923
 MonoBehaviour:
   m_ObjectHideFlags: 0

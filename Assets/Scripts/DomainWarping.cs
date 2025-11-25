@@ -5,6 +5,7 @@
 public class DomainWarping : MonoBehaviour
 {
     public MeshGenerator meshGenerator;
+    public MapGenerator mapGenerator;   // <-- NEW
 
     [Header("Resolution")]
     public bool useMeshSize = true;
@@ -25,27 +26,32 @@ public class DomainWarping : MonoBehaviour
     [Header("Height Output")]
     public float heightMultiplier = 25f;
 
+    [Header("Editor")]
+    public bool autoUpdate = false;
+
     [HideInInspector] public float[,] latestHeightMap;
 
     void OnValidate()
     {
         if (meshGenerator == null)
             meshGenerator = GetComponent<MeshGenerator>();
+
+        if (mapGenerator == null)
+            mapGenerator = GetComponent<MapGenerator>();
     }
+
 
     /// <summary>
     /// Called by editor button. Generates heightmap, assigns it to MeshGenerator, rebuilds mesh.
+    /// </summary>
+    /// <summary>
+    /// Called by editor button. Generates heightmap, assigns it to MeshGenerator,
+    /// rebuilds mesh, and tells MapGenerator to generate textures.
     /// </summary>
     public void GenerateAndApply()
     {
         if (meshGenerator == null)
             meshGenerator = GetComponent<MeshGenerator>();
-
-        if (meshGenerator == null)
-        {
-            Debug.LogError("DomainWarpMountainGenerator: No MeshGenerator found.");
-            return;
-        }
 
         int width, height;
         if (useMeshSize)
@@ -61,10 +67,25 @@ public class DomainWarping : MonoBehaviour
 
         latestHeightMap = GenerateHeightMap(width, height);
 
+        // Update mesh
         meshGenerator.heightMap = latestHeightMap;
         meshGenerator.heightMultiplier = heightMultiplier;
         meshGenerator.CreateShape();
+
+        // Tell MapGenerator to generate textures for this heightmap
+        if (mapGenerator != null)
+        {
+            // If you keep a currentHeightMap in MapGenerator, update it:
+            mapGenerator.currentHeightMap = latestHeightMap;
+
+            // Call YOUR texture method here (this name comes from your Erosion script)
+            mapGenerator.RegenerateTexturesFromHeightMap(latestHeightMap);
+
+            // If your method is instead called GenerateTexture() or similar, use that:
+            // mapGenerator.GenerateTexture(latestHeightMap);
+        }
     }
+
 
     float[,] GenerateHeightMap(int width, int height)
     {

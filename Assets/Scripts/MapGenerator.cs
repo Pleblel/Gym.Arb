@@ -42,7 +42,6 @@ public class MapGenerator : MonoBehaviour
         {
             erosion.heightMap = currentHeightMap;
             erosion.meshGenerator = meshGenerator;
-            erosion.mapGenerator = this;
         }
 
         RegenerateTexturesFromHeightMap(currentHeightMap);

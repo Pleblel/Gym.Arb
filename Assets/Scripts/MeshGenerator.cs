@@ -1,5 +1,5 @@
 using UnityEngine;
-using UnityEngine.Rendering; // <-- add this
+using UnityEngine.Rendering; // <-- keep this
 
 [RequireComponent(typeof(MeshFilter))]
 public class MeshGenerator : MonoBehaviour
@@ -9,8 +9,11 @@ public class MeshGenerator : MonoBehaviour
     int[] triangles;
     Vector2[] uvs;
 
+    [Header("Mesh Resolution")]
     public Vector2Int size = new Vector2Int(128, 128);
     public Vector2 worldSize = new Vector2(100f, 100f);
+
+    [Header("Height Data")]
     public float[,] heightMap;
     public float heightMultiplier = 5f;
 
@@ -20,12 +23,10 @@ public class MeshGenerator : MonoBehaviour
 
         // enable 32-bit indices when needed (or always — it's fine)
         int vertCountEstimate = (size.x + 1) * (size.y + 1);
-        if (vertCountEstimate > 65000)
-            mesh.indexFormat = IndexFormat.UInt32;
-        else
-            mesh.indexFormat = IndexFormat.UInt16;
+        mesh.indexFormat = (vertCountEstimate > 65000) ? IndexFormat.UInt32 : IndexFormat.UInt16;
 
         GetComponent<MeshFilter>().mesh = mesh;
+
     }
 
     public void CreateShape()

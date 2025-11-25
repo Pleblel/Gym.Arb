@@ -5,8 +5,9 @@ public class Erosion : MonoBehaviour
     [Header("References")]
     public MeshGenerator meshGenerator;
     public MapGenerator mapGenerator;
+    public DomainWarping domainWarping;   // last generator (domain warp)
 
-    [HideInInspector] public float[,] heightMap;  
+    [HideInInspector] public float[,] heightMap;
     [Tooltip("How many droplets per bake")]
     public int numIterations = 50000;
 
@@ -32,21 +33,28 @@ public class Erosion : MonoBehaviour
     int currentErosionRadius;
     int currentMapSize;
 
+    void OnValidate()
+    {
+        // convenience: auto-hook references on same GameObject if missing
+        if (meshGenerator == null)
+            meshGenerator = GetComponent<MeshGenerator>();
+        if (domainWarping == null)
+            domainWarping = GetComponent<DomainWarping>();
+        if (mapGenerator == null)
+            mapGenerator = GetComponent<MapGenerator>();
+    }
+
     public void ErosionBake()
     {
-        if (heightMap == null)
+        // ONLY take from MeshGenerator
+        if (meshGenerator == null || meshGenerator.heightMap == null)
         {
-            if (meshGenerator != null && meshGenerator.heightMap != null)
-                heightMap = meshGenerator.heightMap;
-            else if (mapGenerator != null && mapGenerator.currentHeightMap != null)
-                heightMap = mapGenerator.currentHeightMap;
-        }
-
-        if (heightMap == null)
-        {
-            Debug.LogWarning("Erosion: heightMap is null, cannot bake.");
+            Debug.LogWarning("Erosion: MeshGenerator or its heightMap is null, cannot bake.");
             return;
         }
+
+        // Always sync from current mesh heightmap
+        heightMap = meshGenerator.heightMap;
 
         int mapSize = heightMap.GetLength(0);
         if (mapSize != heightMap.GetLength(1))
@@ -55,31 +63,36 @@ public class Erosion : MonoBehaviour
             return;
         }
 
+        // Convert 2D map to 1D
         float[] map1D = new float[mapSize * mapSize];
         for (int y = 0; y < mapSize; y++)
             for (int x = 0; x < mapSize; x++)
                 map1D[y * mapSize + x] = heightMap[x, y];
 
+        // Run erosion
         Erode(map1D, mapSize, numIterations, true);
 
+        // Convert back to 2D
         for (int y = 0; y < mapSize; y++)
             for (int x = 0; x < mapSize; x++)
                 heightMap[x, y] = map1D[y * mapSize + x];
 
-        if (meshGenerator != null)
+        // Push result back into other systems (optional but useful)
+        if (domainWarping != null)
         {
-            meshGenerator.heightMap = heightMap;
-            meshGenerator.CreateShape();
+            domainWarping.latestHeightMap = heightMap;
         }
 
-        // Regenerate textures
+        meshGenerator.heightMap = heightMap;
+        meshGenerator.CreateShape();
+
         if (mapGenerator != null)
         {
+            mapGenerator.currentHeightMap = heightMap;
             mapGenerator.RegenerateTexturesFromHeightMap(heightMap);
         }
-
-        Debug.Log("Erosion: bake complete.");
     }
+
 
     void Initialize(int mapSize, bool resetSeed)
     {
