@@ -46,14 +46,12 @@ public class Erosion : MonoBehaviour
 
     public void ErosionBake()
     {
-        // ONLY take from MeshGenerator
         if (meshGenerator == null || meshGenerator.heightMap == null)
         {
             Debug.LogWarning("Erosion: MeshGenerator or its heightMap is null, cannot bake.");
             return;
         }
 
-        // Always sync from current mesh heightmap
         heightMap = meshGenerator.heightMap;
 
         int mapSize = heightMap.GetLength(0);
@@ -63,21 +61,17 @@ public class Erosion : MonoBehaviour
             return;
         }
 
-        // Convert 2D map to 1D
         float[] map1D = new float[mapSize * mapSize];
         for (int y = 0; y < mapSize; y++)
             for (int x = 0; x < mapSize; x++)
                 map1D[y * mapSize + x] = heightMap[x, y];
 
-        // Run erosion
         Erode(map1D, mapSize, numIterations, true);
 
-        // Convert back to 2D
         for (int y = 0; y < mapSize; y++)
             for (int x = 0; x < mapSize; x++)
                 heightMap[x, y] = map1D[y * mapSize + x];
 
-        // Push result back into other systems (optional but useful)
         if (domainWarping != null)
         {
             domainWarping.latestHeightMap = heightMap;

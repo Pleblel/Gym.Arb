@@ -1,5 +1,5 @@
 using UnityEngine;
-using UnityEngine.Rendering; // <-- keep this
+using UnityEngine.Rendering;
 
 [RequireComponent(typeof(MeshFilter))]
 public class MeshGenerator : MonoBehaviour
@@ -21,7 +21,6 @@ public class MeshGenerator : MonoBehaviour
     {
         mesh = new Mesh();
 
-        // enable 32-bit indices when needed (or always — it's fine)
         int vertCountEstimate = (size.x + 1) * (size.y + 1);
         mesh.indexFormat = (vertCountEstimate > 65000) ? IndexFormat.UInt32 : IndexFormat.UInt16;
 
@@ -36,7 +35,6 @@ public class MeshGenerator : MonoBehaviour
         int width = Mathf.Max(1, size.x);
         int height = Mathf.Max(1, size.y);
 
-        // If resolution changed after Awake, re-check the index format:
         int vertCount = (width + 1) * (height + 1);
         mesh.indexFormat = (vertCount > 65000) ? IndexFormat.UInt32 : IndexFormat.UInt16;
 
